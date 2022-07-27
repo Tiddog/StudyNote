@@ -267,3 +267,28 @@ public class HelloController {
     }
 }
 ```
+
+### 5. 用到的响应实体类
+```java
+/**
+ * ResponseData
+ *
+ * @Author: Jane_YH
+ * @Version: 1.0
+ * @Since: 2022/7/27 16:48
+ */
+@Data
+@AllArgsConstructor
+@NoArgsConstructor
+public class ResponseData<T> implements Serializable {
+    private Integer status;
+    private String message;
+    private T data;
+
+    public ResponseData(T data){
+        this.status = 200;
+        this.message = "请求成功";
+        this.data = data;
+    }
+}
+```
