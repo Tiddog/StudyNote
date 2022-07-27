@@ -105,3 +105,165 @@ ExecutorService executor = Executors.newFixedThreadPool(6);
         List<IgUsedResult> rets = list.stream().map(CompletableFuture::join).collect(Collectors.toList());
         executor.shutdown();
 ```
+
+## 四. 鉴权框架 (JWT)
+
+### 1. 实现JWT相关方法
+
+```java
+/**
+ * JWTUtil
+ *
+ * @Author: Jane_YH
+ * @Version: 1.0
+ * @Since: 2022/7/27 15:54
+ */
+public class JWTUtil {
+
+    // 一个不能暴露的密钥
+    private static String SIGNATURE = "token!@#$%^7890";
+
+    /**
+     * 生成token
+     * @param map
+     * @return
+     */
+    public static String getToken(Map<String,String> map){
+        JWTCreator.Builder builder = JWT.create();
+        // 设置token有关键值对
+        map.forEach((k,v)->{
+            builder.withClaim(k,v);
+        });
+        Calendar instance = Calendar.getInstance();
+        // 超时时限
+        instance.add(Calendar.SECOND,60);
+        builder.withExpiresAt(instance.getTime());
+        return builder.sign(Algorithm.HMAC256(SIGNATURE)).toString();
+    }
+
+    /**
+     * 验证token
+     * @param token
+     */
+    public static void verify(String token){
+        JWT.require(Algorithm.HMAC256(SIGNATURE)).build().verify(token);
+    }
+
+    /**
+     * 获取payload
+     * @param token
+     * @return
+     */
+    public static DecodedJWT getToken(String token){
+        return JWT.require(Algorithm.HMAC256(SIGNATURE)).build().verify(token);
+    }
+    
+}
+```
+
+### 2. IOC思想实现拦截器
+```java
+/**
+ * JWTInterceptor
+ *
+ * @Author: Jane_YH
+ * @Version: 1.0
+ * @Since: 2022/7/27 15:49
+ */
+public class JWTInterceptor implements HandlerInterceptor {
+
+    /**
+     * 请求拦截具体操作
+     * @param request current HTTP request
+     * @param response current HTTP response
+     * @param handler chosen handler to execute, for type and/or instance evaluation
+     * @return
+     * @throws Exception
+     */
+    @Override
+    public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler)
+            throws Exception{
+        // 从请求头中获取到token
+        String token = request.getHeader("token");
+        ResponseData res = new ResponseData();
+        // 鉴别token是否有效
+        // 有效则操作继续往下执行
+        // 无效则打印错误信息
+        try{
+            JWTUtil.verify(token);
+            return true;
+        }catch (SignatureVerificationException e){
+            res.setStatus(300);
+            res.setMessage("无效签名");
+        }catch (TokenExpiredException e){
+            res.setStatus(300);
+            res.setMessage("token过期");
+        }catch (AlgorithmMismatchException e){
+            res.setStatus(300);
+            res.setMessage("token算法不一致");
+        }catch (Exception e) {
+            res.setStatus(300);
+            res.setMessage("token失效");
+        }
+        String json = new ObjectMapper().writeValueAsString(res);
+        response.setContentType("application/json;charset=UTF-8");
+        response.getWriter().print(json);
+        return false;
+    }
+}
+```
+
+### 3. 配置拦截路径
+```java
+/**
+ * InterceptorConfig
+ *
+ * @Author: Jane_YH
+ * @Version: 1.0
+ * @Since: 2022/7/27 16:06
+ */
+@Configuration
+public class InterceptorConfig implements WebMvcConfigurer {
+    @Override
+    public void addInterceptors(InterceptorRegistry registry){
+        registry.addInterceptor(new JWTInterceptor())
+                // 要拦截的路径
+                .addPathPatterns("/**")
+                // 放行的路径
+                .excludePathPatterns("/hello/**");
+    }
+}
+```
+
+### 4. 在controller层中的使用
+```java
+/**
+ * HelloController
+ *
+ * @Author: Jane_YH
+ * @Version: 1.0
+ * @Since: 2022/7/27 14:42
+ */
+@Controller
+@RequestMapping(value = "/hello")
+public class HelloController {
+
+    @PostMapping(value = "/test")
+    @ResponseBody
+    public ResponseData helloWorld(@RequestBody User user){
+        Map<String,Object> map = new HashMap<>();
+        // 用户登录信息正确则生成token
+        try{
+            Map<String,String> payload = new HashMap<>();
+            payload.put("username",user.getUsername());
+            String token = JWTUtil.getToken(payload);
+            map.put("username",user.getUsername());
+            map.put("token",token);
+            return new ResponseData(map);
+        }catch (Exception e){
+            map.put("msg",e.getMessage());
+            return new ResponseData(500,"服务器异常",map);
+        }
+    }
+}
+```
